@@ -79,7 +79,7 @@ public class LSL {
         /* to the received time stamps. */
         public static final int proc_dejitter = 2;		/* Remove jitter from time stamps. This will apply a smoothing algorithm to the received time stamps; */
         /* the smoothing needs to see a minimum number of samples (30-120 seconds worst-case) until the remaining */
-								/* jitter is consistently below 1ms. */
+        /* jitter is consistently below 1ms. */
         public static final int proc_monotonize = 4;	/* Force the time-stamps to be monotonically ascending (only makes sense if timestamps are dejittered). */
         public static final int proc_threadsafe = 8;    /* Post-processing is thread-safe (same inlet can be read from by multiple threads); uses somewhat more CPU. */
         public static final int proc_ALL = 1|2|4|8;		/* The combination of all possible post-processing options. */
@@ -140,7 +140,7 @@ public class LSL {
      * the stream on the network. Recipients who discover the outlet can query the stream_info; it is also
      * written to disk when recording the stream (playing a similar role as a file header).
      */
-    public static class StreamInfo {
+    public static class StreamInfo implements AutoCloseable{
         /**
          * Construct a new stream_info object.
          * Core stream information is specified here. Any remaining meta-data can be added later.
@@ -164,6 +164,8 @@ public class LSL {
         public StreamInfo(String name, String type, int channel_count) { obj = inst.lsl_create_streaminfo(name, type, channel_count, IRREGULAR_RATE, ChannelFormat.float32, ""); }
         public StreamInfo(String name, String type) { obj = inst.lsl_create_streaminfo(name, type, 1, IRREGULAR_RATE, ChannelFormat.float32, ""); }
         public StreamInfo(Pointer handle) { obj = handle; }
+
+        public void close() {destroy();}
 
         /** Destroy a previously created StreamInfo object. */
         public void destroy() { inst.lsl_destroy_streaminfo(obj); }
@@ -289,7 +291,10 @@ public class LSL {
          * Important: if you use a stream content type for which meta-data recommendations exist, please
          * try to lay out your meta-data in agreement with these recommendations for compatibility with other applications.
          */
-        public XMLElement desc() { return new XMLElement(inst.lsl_get_desc(obj)); }
+        public XMLElement desc() {
+            //todo: this operation looks dangerous at a code level. I think that this will be a dangling reference if you close the StreamInfo
+            return new XMLElement(inst.lsl_get_desc(obj));
+        }
 
         /**
          * Retrieve the entire stream_info in XML format.
@@ -299,7 +304,11 @@ public class LSL {
          *  b) the misc elements <version>, <created_at>, <uid>, <session_id>, <v4address>, <v4data_port>, <v4service_port>, <v6address>, <v6data_port>, <v6service_port>
          *  c) the extended description element <desc> with user-defined sub-elements.
          */
-        public String as_xml() { return inst.lsl_get_xml(obj); }
+        public String as_xml() {
+            //todo: this is a memory leak (unless JNA has magic for it?). This native method allocates a char*
+            //and I don't see a way that is ever freed
+            return inst.lsl_get_xml(obj);
+        }
 
         /**
          * Get access to the underlying native handle.
@@ -318,7 +327,7 @@ public class LSL {
      * A stream outlet.
      * Outlets are used to make streaming data (and the meta-data) available on the lab network.
      */
-    public static class StreamOutlet {
+    public static class StreamOutlet implements AutoCloseable {
         /**
          * Establish a new stream outlet. This makes the stream discoverable.
          * @param info The stream information to use for creating this stream. Stays constant over the lifetime of the outlet.
@@ -468,6 +477,7 @@ public class LSL {
      */
     public static StreamInfo[] resolve_streams(double wait_time)
     {
+        //todo - All of these StreamInfo objects represent a memory leak in the native code
         Pointer[] buf = new Pointer[1024]; int num = inst.lsl_resolve_all(buf, buf.length, wait_time);
         StreamInfo[] res = new StreamInfo[num];
         for (int k = 0; k < num; k++)
@@ -489,6 +499,7 @@ public class LSL {
      */
     public static StreamInfo[] resolve_stream(String prop, String value, int minimum, double timeout)
     {
+        //todo - All of these StreamInfo objects represent a memory leak in the native code
         Pointer[] buf = new Pointer[1024]; int num = inst.lsl_resolve_byprop(buf, buf.length, prop, value, minimum, timeout);
         StreamInfo[] res = new StreamInfo[num];
         for (int k = 0; k < num; k++)
@@ -511,6 +522,7 @@ public class LSL {
      */
     public static StreamInfo[] resolve_stream(String pred, int minimum, double timeout)
     {
+        //todo - All of these StreamInfo objects represent a memory leak in the native code
         Pointer[] buf = new Pointer[1024]; int num = inst.lsl_resolve_bypred(buf, buf.length, pred, minimum, timeout);
         StreamInfo[] res = new StreamInfo[num];
         for (int k = 0; k < num; k++)
@@ -529,7 +541,7 @@ public class LSL {
      * A stream inlet.
      * Inlets are used to receive streaming data (and meta-data) from the lab network.
      */
-    public static class StreamInlet {
+    public static class StreamInlet implements AutoCloseable {
         /**
          * Construct a new stream inlet from a resolved stream info.
          * @param info A resolved stream info object (as coming from one of the resolver functions).
@@ -803,7 +815,7 @@ public class LSL {
      * its lifetime and which can be queried at any time for the set of streams that are currently
      * visible on the network.
      */
-    public static class ContinuousResolver {
+    public static class ContinuousResolver implements AutoCloseable {
         /**
          * Construct a new continuous_resolver that resolves all streams on the network.
          * This is analogous to the functionality offered by the free function resolve_streams().
@@ -839,7 +851,7 @@ public class LSL {
          * It is recommended to close a resolver once not needed any more to avoid spamming
          * the network with resolve queries.
          */
-        void close() { inst.lsl_destroy_continuous_resolver(obj); }
+        public void close() { inst.lsl_destroy_continuous_resolver(obj); }
 
         /**
          * Obtain the set of currently present streams on the network (i.e. resolve result).
@@ -847,6 +859,7 @@ public class LSL {
          *         which can subsequently be used to open an inlet.
          */
         public StreamInfo[] results() {
+            //todo - All of these StreamInfo objects represent a memory leak in the native code
             Pointer[] buf = new Pointer[1024];
             int num = inst.lsl_resolver_results(obj,buf,buf.length);
             StreamInfo[] res = new StreamInfo[num];
